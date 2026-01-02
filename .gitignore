@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+
+# ML artifacts / data (must not be committed)
+data/raw/*
+!data/raw/*.dvc
+!data/raw/.gitkeep
+
+data/processed/*
+!data/processed/*.dvc
+!data/processed/.gitkeep
+
+artifacts/*
+!artifacts/*.dvc
+!artifacts/.gitkeep
+
+plots/mlruns/
+mlruns/
+*.ckpt
+*.pth
+*.onnx
+*.trt
+
+# Hydra
+outputs/
+.multirun/
+
+# DVC
+.dvc/cache/

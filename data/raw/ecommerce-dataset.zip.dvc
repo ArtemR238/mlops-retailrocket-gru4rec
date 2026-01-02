@@ -1,0 +1,5 @@
+outs:
+- md5: 9c8a6e502a5e71a00e49c0ac8b95a87f
+  size: 304719974
+  hash: md5
+  path: ecommerce-dataset.zip
