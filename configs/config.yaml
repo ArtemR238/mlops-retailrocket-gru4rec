@@ -5,7 +5,9 @@ defaults:
   - infer: default
   - eval: default
   - serve: default
+  - export: default
   - logging: mlflow
+  - _self_
 
 project_name: retailrocket-gru4rec
 seed: 42

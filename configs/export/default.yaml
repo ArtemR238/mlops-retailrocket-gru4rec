@@ -1,0 +1,6 @@
+# configs/export/default.yaml
+checkpoint_path: artifacts/checkpoints/last.ckpt
+onnx_path: artifacts/onnx/gru4rec.onnx
+opset: 18
+dummy_batch: 1
+dummy_seq_len: 20

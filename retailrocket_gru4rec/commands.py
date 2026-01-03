@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import fire
 import pytorch_lightning as pl
 import torch
+import torch.nn as nn
 from hydra import compose, initialize_config_dir
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
@@ -261,7 +262,7 @@ def train(*overrides: str) -> None:
 
     ckpt_cb = ModelCheckpoint(
         dirpath=str(checkpoints_dir),
-        filename="epoch={epoch}-val_loss={val/loss:.4f}",
+        filename="epoch={epoch}-step={step}",
         monitor="val/loss",
         mode="min",
         save_top_k=1,
@@ -374,7 +375,13 @@ def infer(*overrides: str) -> None:
 
 
 def export_onnx(*overrides: str) -> None:
-    """Export GRU4Rec checkpoint to ONNX."""
+    """Export GRU4Rec checkpoint to ONNX with a single input: `sequence`.
+
+    ВАЖНО:
+    - torch>=2.6 по умолчанию использует dynamo exporter (torch.export) и может падать на RNN.
+    - Мы принудительно используем legacy exporter: dynamo=False.
+    - Чтобы не тащить pack_padded_sequence в ONNX, делаем wrapper без packing.
+    """
     cfg = _compose_config(_normalize_overrides(overrides))
     repo_root = find_repo_root()
 
@@ -385,7 +392,8 @@ def export_onnx(*overrides: str) -> None:
     onnx_path = repo_root / str(cfg.export.onnx_path)
     onnx_path.parent.mkdir(parents=True, exist_ok=True)
 
-    model = load_model_from_ckpt(
+    # Загружаем torch-модель на CPU
+    base_model = load_model_from_ckpt(
         checkpoint_path=checkpoint_path,
         vocab_size=spec.vocab_size,
         pad_id=spec.pad_id,
@@ -395,23 +403,87 @@ def export_onnx(*overrides: str) -> None:
         dropout=float(cfg.model.dropout),
         device="cpu",
     )
+    base_model.eval()
 
-    dummy_seq = torch.ones((1, int(cfg.data.max_session_len)), dtype=torch.long)
-    dummy_lengths = torch.tensor([int(cfg.data.max_session_len)], dtype=torch.long)
+    # ---- helpers to be robust to attribute names ----
+    def _get_attr(obj: object, candidates: List[str]):
+        for name in candidates:
+            if hasattr(obj, name):
+                return getattr(obj, name)
+        raise AttributeError(f"Cannot find any of attributes {candidates} in {type(obj)}")
 
-    torch.onnx.export(
-        model,
-        (dummy_seq, dummy_lengths),
-        str(onnx_path),
-        input_names=["sequence", "lengths"],
-        output_names=["logits"],
-        dynamic_axes={
-            "sequence": {0: "batch", 1: "seq_len"},
-            "lengths": {0: "batch"},
-            "logits": {0: "batch"},
-        },
-        opset_version=17,
-    )
+    embedding = _get_attr(base_model, ["embedding", "item_embedding", "emb", "embed"])
+    gru = _get_attr(base_model, ["gru", "rnn"])
+    proj = _get_attr(base_model, ["fc", "out", "output", "classifier", "linear"])
+
+    dropout_layer = getattr(base_model, "dropout", None)  # optional
+
+    class GRU4RecOnnxSingleInput(nn.Module):
+        """ONNX-friendly wrapper: input only `sequence` -> output `logits`."""
+
+        def __init__(self, pad_id: int):
+            super().__init__()
+            self.embedding = embedding
+            self.gru = gru
+            self.proj = proj
+            self.dropout_layer = dropout_layer
+            self.register_buffer(
+                "pad_id_t", torch.tensor(int(pad_id), dtype=torch.long), persistent=False
+            )
+
+        def forward(self, sequence: torch.Tensor) -> torch.Tensor:
+            # sequence: [B, T] int64
+            mask = sequence != self.pad_id_t  # [B, T] bool
+            lengths = mask.sum(dim=1).clamp(min=1)  # [B] int64
+
+            x = self.embedding(sequence)  # [B, T, E] (обычно)
+            # зануляем padded позиции, чтобы они не влияли
+            x = x * mask.unsqueeze(-1).to(dtype=x.dtype)
+
+            out, _ = self.gru(x)  # batch_first может быть True/False
+            # out: [B, T, H] если batch_first=True, иначе [T, B, H]
+            if getattr(self.gru, "batch_first", False) is False:
+                out = out.transpose(0, 1)  # -> [B, T, H]
+
+            # берём hidden на индексе (lengths-1) для каждого batch
+            idx = (lengths - 1).view(-1, 1, 1).expand(out.size(0), 1, out.size(2))  # [B,1,H]
+            last = out.gather(1, idx).squeeze(1)  # [B,H]
+
+            if isinstance(self.dropout_layer, nn.Module):
+                last = self.dropout_layer(last)
+
+            logits = self.proj(last)  # [B, vocab]
+            return logits
+
+    wrapper = GRU4RecOnnxSingleInput(pad_id=spec.pad_id).eval()
+
+    # dummy input
+    dummy_batch = int(cfg.export.get("dummy_batch", 1))
+    dummy_seq_len = int(cfg.export.get("dummy_seq_len", int(cfg.data.max_session_len)))
+    # лучше не паддинг, чтобы lengths > 0
+    fill_id = 1 if spec.pad_id != 1 else 2
+    dummy_seq = torch.full((dummy_batch, dummy_seq_len), fill_value=fill_id, dtype=torch.long)
+
+    # Рекомендую opset 18 (у тебя и так PyTorch говорит что поднимет до 18)
+    opset = int(cfg.export.get("opset", 18))
+
+    with torch.inference_mode():
+        torch.onnx.export(
+            wrapper,
+            (dummy_seq,),
+            str(onnx_path),
+            input_names=["sequence"],
+            output_names=["logits"],
+            dynamic_axes={
+                "sequence": {0: "batch", 1: "seq_len"},
+                "logits": {0: "batch"},
+            },
+            opset_version=opset,
+            do_constant_folding=True,
+            # КЛЮЧЕВОЕ: выключаем dynamo exporter, чтобы не падало на torch.export + GRU
+            dynamo=False,
+        )
+
     print(f"Exported ONNX to: {onnx_path}")
 
 
