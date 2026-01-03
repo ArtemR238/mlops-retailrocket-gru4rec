@@ -23,6 +23,30 @@ from retailrocket_gru4rec.data.dataset import load_vocab
 from retailrocket_gru4rec.inference.predictor import load_model_from_ckpt, predict_topk
 
 
+def _unwrap_topk(x: Any) -> np.ndarray:
+    """
+    predict_topk() может вернуть:
+      - np.ndarray (B, K)
+      - torch.Tensor (B, K)
+      - InferenceResult(...) с полем topk_items / items / item_ids / recs / predictions
+
+    Приводим к np.ndarray[int64] (B, K).
+    """
+    # unwrap common container attrs
+    for attr in ("topk_items", "items", "item_ids", "recs", "predictions", "topk"):
+        if hasattr(x, attr):
+            x = getattr(x, attr)
+            break
+
+    if isinstance(x, torch.Tensor):
+        x = x.detach().cpu().numpy()
+
+    x = np.asarray(x, dtype=np.int64)
+    if x.ndim != 2:
+        raise ValueError(f"Expected topk shape (B, K), got shape={x.shape}")
+    return x
+
+
 def _iter_items(sessions: Iterable[List[int]], pad_id: int) -> Iterable[int]:
     for seq in sessions:
         for x in seq:
@@ -57,9 +81,13 @@ def _metrics_from_recs(recs: np.ndarray, targets: np.ndarray, k: int) -> Dict[st
 
     recall = float(hit_any.mean())
 
-    mrr = float(np.where(ranks > 0, 1.0 / ranks, 0.0).mean())
-
-    ndcg = float(np.where(ranks > 0, 1.0 / np.log2(ranks + 1), 0.0).mean())
+    mask = ranks > 0
+    if mask.any():
+        mrr = float((1.0 / ranks[mask]).mean())
+        ndcg = float((1.0 / np.log2(ranks[mask] + 1)).mean())
+    else:
+        mrr = 0.0
+        ndcg = 0.0
 
     return {"recall": recall, "mrr": mrr, "ndcg": ndcg}
 
@@ -160,8 +188,16 @@ def evaluate_gru4rec_from_checkpoint(
         end = min(start + batch_size, len(prefixes))
         batch = prefixes[start:end]
         seqs = pad_batch(batch).to(device)
-        topk_items = predict_topk(model=model, sequences=seqs, topk=max_k)
-        recs[start:end, :] = topk_items
+        topk_items = predict_topk(
+            model=model,
+            sequences=seqs,
+            k=max_k,
+            pad_id=spec.pad_id,
+            device=device,
+        )
+
+        topk_items_np = _unwrap_topk(topk_items)
+        recs[start:end, :] = topk_items_np
         start = end
 
     report: Dict[str, Dict[str, float]] = {}

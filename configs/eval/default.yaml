@@ -8,6 +8,8 @@ output_path: plots/offline_eval.json
 
 # Batch size for GRU4Rec evaluation
 batch_size: 512
+device: cpu
 
+pad_id: 
 # Optionally log metrics to MLflow (requires server)
 log_to_mlflow: false

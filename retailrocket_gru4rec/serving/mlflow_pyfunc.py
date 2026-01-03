@@ -88,7 +88,7 @@ class GRU4RecPyFunc(mlflow.pyfunc.PythonModel):
 
         sequences = torch.from_numpy(arr).long().to(self.params.device)
 
-        topk_items = predict_topk(self._model, sequences=sequences, topk=int(self.params.topk))
+        topk_items = predict_topk(self._model, sequences=sequences, k=int(self.params.topk))
         return pd.DataFrame({"recommendations": topk_items.tolist()})
 
 
