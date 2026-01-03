@@ -12,7 +12,7 @@ import torch
 from hydra import compose, initialize_config_dir
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
-from pytorch_lightning.loggers import MLFlowLogger
+from pytorch_lightning.loggers import CSVLogger, MLFlowLogger
 
 from retailrocket_gru4rec.data.dataset import load_vocab
 from retailrocket_gru4rec.data.download import ensure_raw_data
@@ -22,10 +22,47 @@ from retailrocket_gru4rec.evaluation.offline import (
     evaluate_top_popular,
 )
 from retailrocket_gru4rec.inference.predictor import load_model_from_ckpt, run_offline_inference
+from retailrocket_gru4rec.models.gru4rec import GRU4RecConfig
 from retailrocket_gru4rec.training.callbacks import SaveCurvesCallback
 from retailrocket_gru4rec.training.data_module import RetailRocketDataModule
-from retailrocket_gru4rec.training.lit_module import GRU4RecLightning
+from retailrocket_gru4rec.training.lit_module import GRU4RecLightning, OptimConfig
 from retailrocket_gru4rec.utils import find_repo_root, get_git_commit_id
+
+
+def _build_logger(cfg: DictConfig, repo_root: Path):
+    tracking_uri = str(cfg.logging.tracking_uri)
+    experiment_name = str(cfg.logging.experiment_name)
+    run_name = (
+        str(cfg.logging.run_name) if "run_name" in cfg.logging and cfg.logging.run_name else None
+    )
+
+    try:
+        import mlflow
+        from mlflow.tracking import MlflowClient
+
+        client = MlflowClient(tracking_uri=tracking_uri)
+        # любой REST-вызов, чтобы сразу проверить доступность
+        client.get_experiment_by_name(experiment_name)
+
+        return MLFlowLogger(
+            experiment_name=experiment_name,
+            tracking_uri=tracking_uri,
+            run_name=run_name,
+        )
+    except Exception as e:
+        fail = (
+            bool(cfg.logging.fail_if_unavailable) if "fail_if_unavailable" in cfg.logging else True
+        )
+        if fail:
+            raise RuntimeError(
+                "MLflow недоступен по tracking_uri="
+                f"{tracking_uri}. Запустите `mlflow server` на этой машине "
+                "или пробросьте порт 8080, либо поставьте logging.fail_if_unavailable=false."
+            ) from e
+
+        # fallback: локальные CSV-логи, чтобы train мог идти
+        logs_dir = repo_root / "artifacts" / "csv_logs"
+        return CSVLogger(save_dir=str(logs_dir), name="pl")
 
 
 def _normalize_overrides(overrides: Tuple[str, ...] | List[str] | None) -> List[str]:
@@ -186,23 +223,27 @@ def train(*overrides: str) -> None:
         seed=seed,
     )
 
-    model = GRU4RecLightning(
+    model_cfg = GRU4RecConfig(
         vocab_size=spec.vocab_size,
         pad_id=spec.pad_id,
         embedding_dim=int(cfg.model.embedding_dim),
         hidden_dim=int(cfg.model.hidden_dim),
         num_layers=int(cfg.model.num_layers),
         dropout=float(cfg.model.dropout),
-        lr=float(cfg.train.lr),
+    )
+
+    optim_cfg = OptimConfig(
+        learning_rate=float(cfg.train.learning_rate),
         weight_decay=float(cfg.train.weight_decay),
+    )
+
+    model = GRU4RecLightning(
+        model_cfg=model_cfg,
+        optim_cfg=optim_cfg,
         k_metrics=list(cfg.train.k_metrics),
     )
 
-    mlf_logger = MLFlowLogger(
-        experiment_name=str(cfg.logging.experiment_name),
-        tracking_uri=str(cfg.logging.tracking_uri),
-        run_name=str(cfg.logging.run_name) if "run_name" in cfg.logging else None,
-    )
+    mlf_logger = _build_logger(cfg, repo_root)
 
     # Log params in a safe, flat form
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)  # type: ignore[assignment]
@@ -220,8 +261,8 @@ def train(*overrides: str) -> None:
 
     ckpt_cb = ModelCheckpoint(
         dirpath=str(checkpoints_dir),
-        filename="epoch={epoch}-val_loss={val_loss:.4f}",
-        monitor="val_loss",
+        filename="epoch={epoch}-val_loss={val/loss:.4f}",
+        monitor="val/loss",
         mode="min",
         save_top_k=1,
         save_last=True,
@@ -239,6 +280,7 @@ def train(*overrides: str) -> None:
         log_every_n_steps=int(cfg.train.log_every_n_steps),
         default_root_dir=str(artifacts_dir),
         enable_checkpointing=True,
+        gradient_clip_val=float(cfg.train.gradient_clip_val),
     )
 
     trainer.fit(model, datamodule=dm)

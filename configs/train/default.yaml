@@ -9,6 +9,10 @@ gradient_clip_val: 1.0
 artifacts_dir: artifacts
 checkpoints_dir: ${train.artifacts_dir}/checkpoints
 
+accelerator: cpu
+devices: 1
+log_every_n_steps: 50
+
 # logging / plots
 plots_dir: plots
 k_metrics: [5, 10, 20]

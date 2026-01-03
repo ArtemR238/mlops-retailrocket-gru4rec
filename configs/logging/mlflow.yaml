@@ -1,3 +1,6 @@
-tracking_uri: "http://127.0.0.1:8080"
-experiment_name: "retailrocket-gru4rec"
+tracking_uri: http://127.0.0.1:8080
+experiment_name: retailrocket-gru4rec
 run_name: null
+
+# если true — падать с понятным сообщением, если MLflow недоступен
+fail_if_unavailable: true
