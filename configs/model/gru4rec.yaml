@@ -1,0 +1,4 @@
+embedding_dim: 64
+hidden_dim: 64
+num_layers: 1
+dropout: 0.1

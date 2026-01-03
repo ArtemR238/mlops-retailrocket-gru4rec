@@ -1,0 +1,13 @@
+# Offline evaluation configuration
+
+# By default we evaluate the best checkpoint used for inference
+checkpoint_path: ${infer.checkpoint_path}
+
+# Where to store the JSON summary
+output_path: plots/offline_eval.json
+
+# Batch size for GRU4Rec evaluation
+batch_size: 512
+
+# Optionally log metrics to MLflow (requires server)
+log_to_mlflow: false

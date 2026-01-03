@@ -1,0 +1,10 @@
+stages:
+  preprocess:
+    cmd: poetry run rrgr preprocess data.use_dvc_pull=false
+    deps:
+      - retailrocket_gru4rec/data/preprocess.py
+      - retailrocket_gru4rec/data/download.py
+      - retailrocket_gru4rec/data/dataset.py
+      - configs
+    outs:
+      - data/processed
