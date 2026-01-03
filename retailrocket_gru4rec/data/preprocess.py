@@ -25,11 +25,20 @@ class Vocab:
         return [int(self.id_to_item.get(int(x), -1)) for x in token_ids]
 
 
-def unzip_raw(zip_path: Path, output_dir: Path) -> None:
-    """Unzip kaggle dataset archive into output_dir."""
-    output_dir.mkdir(parents=True, exist_ok=True)
+def unzip_raw(
+    zip_path: Path,
+    raw_dir: Optional[Path] = None,
+    output_dir: Optional[Path] = None,
+) -> None:
+    target_dir = raw_dir if raw_dir is not None else output_dir
+    if target_dir is None:
+        raise ValueError("Provide either raw_dir or output_dir to unzip_raw().")
+
+    target_dir = Path(target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+
     with zipfile.ZipFile(zip_path, "r") as zf:
-        zf.extractall(output_dir)
+        zf.extractall(target_dir)
 
 
 def _build_sessions(

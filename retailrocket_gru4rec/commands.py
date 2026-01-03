@@ -22,16 +22,12 @@ from retailrocket_gru4rec.evaluation.offline import (
     evaluate_top_popular,
 )
 from retailrocket_gru4rec.inference.predictor import load_model_from_ckpt, run_offline_inference
-from retailrocket_gru4rec.serving.mlflow_pyfunc import save_pyfunc_model
 from retailrocket_gru4rec.training.callbacks import SaveCurvesCallback
 from retailrocket_gru4rec.training.data_module import RetailRocketDataModule
 from retailrocket_gru4rec.training.lit_module import GRU4RecLightning
 from retailrocket_gru4rec.utils import find_repo_root, get_git_commit_id
 
 
-# -------------------------
-# Small utilities
-# -------------------------
 def _normalize_overrides(overrides: Tuple[str, ...] | List[str] | None) -> List[str]:
     if overrides is None:
         return []
@@ -124,22 +120,33 @@ def _ensure_processed_data(cfg: DictConfig) -> Path:
 
     # If raw zip is missing, download (Kaggle credentials must be configured in env/home).
     if not raw_zip.exists():
-        ensure_raw_data(output_path=raw_zip, kaggle_dataset=str(cfg.data.kaggle_dataset))
+        ensure_raw_data(
+            raw_dir=raw_dir,
+            dataset=str(cfg.data.kaggle_dataset),
+            zip_name=str(cfg.data.raw_zip_name),
+        )
 
     # Unzip once into raw_dir (events.csv, etc.)
-    events_csv = raw_dir / "events.csv"
-    if not events_csv.exists():
-        unzip_raw(zip_path=raw_zip, raw_dir=raw_dir)
+    unzip_dir = raw_dir / "unzipped"
+    if not unzip_dir.exists():
+        unzip_dir.mkdir(parents=True, exist_ok=True)
+        unzip_raw(zip_path=raw_zip, output_dir=unzip_dir)
+
+    processed_dir.mkdir(parents=True, exist_ok=True)
+
+    test_size = cfg.data.get("test_size", None)
+    test_size = None if test_size is None else float(test_size)
 
     # Build processed parquet + vocab
     preprocess_retailrocket(
-        raw_dir=raw_dir,
-        processed_dir=processed_dir,
-        max_users=(None if cfg.data.max_users is None else int(cfg.data.max_users)),
-        session_gap_minutes=int(cfg.data.session_gap_minutes),
+        input_dir=unzip_dir,
+        output_dir=processed_dir,
         min_session_len=int(cfg.data.min_session_len),
         max_session_len=int(cfg.data.max_session_len),
+        test_size=test_size,
+        session_gap_minutes=int(cfg.data.session_gap_minutes),
         min_item_interactions=int(cfg.data.min_item_interactions),
+        max_users=None if cfg.data.max_users is None else int(cfg.data.max_users),
         train_frac=float(cfg.data.train_frac),
         val_frac=float(cfg.data.val_frac),
         test_frac=float(cfg.data.test_frac),
@@ -367,6 +374,8 @@ def export_onnx(*overrides: str) -> None:
 
 
 def export_mlflow(*overrides: str) -> None:
+    from retailrocket_gru4rec.serving.mlflow_pyfunc import save_pyfunc_model
+
     """Export MLflow pyfunc model directory for `mlflow models serve`."""
     cfg = _compose_config(_normalize_overrides(overrides))
     repo_root = find_repo_root()

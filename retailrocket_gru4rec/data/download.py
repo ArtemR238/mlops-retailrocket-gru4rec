@@ -11,23 +11,23 @@ def _has_kaggle_credentials() -> bool:
     return kaggle_json.exists() or ("KAGGLE_USERNAME" in os.environ and "KAGGLE_KEY" in os.environ)
 
 
-def download_retailrocket_kaggle(raw_dir: Path, dataset: str, zip_name: str) -> Path:
+def download_retailrocket_kaggle(raw_zip: Path, dataset: str, zip_name: str) -> Path:
     """Download Kaggle dataset zip into raw_dir using kaggle CLI.
 
     Requires `kaggle` command available and credentials configured.
     """
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    zip_path = raw_dir / zip_name
+    raw_zip.mkdir(parents=True, exist_ok=True)
+    zip_path = raw_zip / zip_name
     if zip_path.exists():
         return zip_path
 
     # The kaggle command comes from the `kaggle` Python package.
     # We call it via subprocess to avoid extra runtime dependencies.
-    cmd = ["kaggle", "datasets", "download", "-d", dataset, "-p", str(raw_dir), "--force"]
+    cmd = ["kaggle", "datasets", "download", "-d", dataset, "-p", str(raw_zip), "--force"]
     subprocess.check_call(cmd)
     # Kaggle usually names the archive after the dataset slug (ecommerce-dataset.zip),
     # but we normalize to zip_name.
-    downloaded = next(raw_dir.glob("*.zip"))
+    downloaded = next(raw_zip.glob("*.zip"))
     if downloaded.name != zip_name:
         shutil.move(str(downloaded), str(zip_path))
     return zip_path

@@ -1,32 +1,32 @@
-# Data paths
+# Data paths (relative to repo root)
 raw_dir: data/raw
 processed_dir: data/processed
 
-# Kaggle dataset id
+# Raw dataset source (Kaggle)
 kaggle_dataset: retailrocket/ecommerce-dataset
 raw_zip_name: ecommerce-dataset.zip
 
-# Sessionization
+# Sessionization / preprocessing
 session_gap_minutes: 30
 min_session_len: 3
 max_session_len: 20
 
-# Optional subsampling for course-scale runs
-max_users: 200000 # set null to disable
+# Optional legacy split style:
+# If not null -> test_frac=test_size, val_frac=test_size, train_frac=1-2*test_size
+# If null -> use train_frac/val_frac/test_frac below
+test_size: null
 
-# Filtering
-min_item_interactions: 5
-
-# Splits (by session end time)
+# Recommended split style (used when test_size is null)
 train_frac: 0.8
 val_frac: 0.1
 test_frac: 0.1
 
+# Optional subsampling for course-scale runs (null -> disable)
+max_users: 200000
+
+# Filtering
+min_item_interactions: 5
+
 # DVC integration
 use_dvc_pull: true
-dvc_targets:
-  - data/raw/ecommerce-dataset.zip
-  - data/processed/vocab.json
-  - data/processed/train.parquet
-  - data/processed/val.parquet
-  - data/processed/test.parquet
+

@@ -11,13 +11,13 @@ from torch.utils.data import Dataset
 
 
 @dataclass(frozen=True)
-class DataSpec:
+class VocabSpec:
     pad_id: int
     oov_id: int
     vocab_size: int
 
 
-def load_vocab(vocab_path: Path) -> DataSpec:
+def load_vocab(vocab_path: Path) -> VocabSpec:
     import json
 
     payload = json.loads(vocab_path.read_text(encoding="utf-8"))
@@ -25,7 +25,7 @@ def load_vocab(vocab_path: Path) -> DataSpec:
     oov_id = int(payload["oov_id"])
     # +2 for PAD/OOV if not included already; item_to_id values start from 2 in our preprocessing
     vocab_size = max(payload["item_to_id"].values(), default=1) + 1
-    return DataSpec(pad_id=pad_id, oov_id=oov_id, vocab_size=vocab_size)
+    return VocabSpec(pad_id=pad_id, oov_id=oov_id, vocab_size=vocab_size)
 
 
 class SessionNextItemDataset(Dataset):
