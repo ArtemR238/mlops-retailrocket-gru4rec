@@ -1,19 +1,15 @@
-# retailrocket_gru4rec/commands.py
 from __future__ import annotations
 
 import json
 import subprocess
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import fire
+import mlflow
 import pytorch_lightning as pl
 import torch
-import torch.nn as nn
-from hydra import compose, initialize_config_dir
 from omegaconf import DictConfig, OmegaConf
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
-from pytorch_lightning.loggers import CSVLogger, MLFlowLogger
 
 from retailrocket_gru4rec.data.dataset import load_vocab
 from retailrocket_gru4rec.data.download import ensure_raw_data
@@ -22,115 +18,22 @@ from retailrocket_gru4rec.evaluation.offline import (
     evaluate_gru4rec_from_checkpoint,
     evaluate_top_popular,
 )
-from retailrocket_gru4rec.inference.predictor import load_model_from_ckpt, run_offline_inference
+from retailrocket_gru4rec.inference.predictor import load_model_from_ckpt
 from retailrocket_gru4rec.models.gru4rec import GRU4RecConfig
+from retailrocket_gru4rec.serving.mlflow_pyfunc import save_pyfunc_model
 from retailrocket_gru4rec.training.callbacks import SaveCurvesCallback
 from retailrocket_gru4rec.training.data_module import RetailRocketDataModule
 from retailrocket_gru4rec.training.lit_module import GRU4RecLightning, OptimConfig
-from retailrocket_gru4rec.utils import find_repo_root, get_git_commit_id
-
-
-def _build_logger(cfg: DictConfig, repo_root: Path):
-    tracking_uri = str(cfg.logging.tracking_uri)
-    experiment_name = str(cfg.logging.experiment_name)
-    run_name = (
-        str(cfg.logging.run_name) if "run_name" in cfg.logging and cfg.logging.run_name else None
-    )
-
-    try:
-        import mlflow
-        from mlflow.tracking import MlflowClient
-
-        client = MlflowClient(tracking_uri=tracking_uri)
-        # любой REST-вызов, чтобы сразу проверить доступность
-        client.get_experiment_by_name(experiment_name)
-
-        return MLFlowLogger(
-            experiment_name=experiment_name,
-            tracking_uri=tracking_uri,
-            run_name=run_name,
-        )
-    except Exception as e:
-        fail = (
-            bool(cfg.logging.fail_if_unavailable) if "fail_if_unavailable" in cfg.logging else True
-        )
-        if fail:
-            raise RuntimeError(
-                "MLflow недоступен по tracking_uri="
-                f"{tracking_uri}. Запустите `mlflow server` на этой машине "
-                "или пробросьте порт 8080, либо поставьте logging.fail_if_unavailable=false."
-            ) from e
-
-        # fallback: локальные CSV-логи, чтобы train мог идти
-        logs_dir = repo_root / "artifacts" / "csv_logs"
-        return CSVLogger(save_dir=str(logs_dir), name="pl")
-
-
-def _normalize_overrides(overrides: Tuple[str, ...] | List[str] | None) -> List[str]:
-    if overrides is None:
-        return []
-    if isinstance(overrides, tuple):
-        return [x for x in overrides if x]
-    return [x for x in overrides if x]
-
-
-def _flatten_for_mlflow(d: Dict[str, Any], prefix: str = "") -> Dict[str, str]:
-    """Flatten nested dict into MLflow-friendly (key -> str(value)) map."""
-    out: Dict[str, str] = {}
-    for k, v in d.items():
-        key = f"{prefix}{k}" if not prefix else f"{prefix}.{k}"
-        if isinstance(v, dict):
-            out.update(_flatten_for_mlflow(v, key))
-        elif isinstance(v, (list, tuple)):
-            out[key] = json.dumps(v, ensure_ascii=False)
-        else:
-            out[key] = str(v)
-    return out
-
-
-def _compose_config(overrides: List[str]) -> DictConfig:
-    """Hydra compose API (CLI-friendly): config is loaded from repo_root/configs."""
-    repo_root = find_repo_root()
-    config_dir = repo_root / "configs"
-    with initialize_config_dir(version_base=None, config_dir=str(config_dir)):
-        # convention: root config file is configs/config.yaml
-        cfg = compose(config_name="config", overrides=overrides)
-    return cfg
-
-
-def _dvc_pull(repo_root: Path, targets: Iterable[Path]) -> None:
-    """Try to fetch targets via DVC Python API; fallback to CLI; do not hard-fail."""
-    rel_targets: List[str] = []
-    for t in targets:
-        try:
-            rel_targets.append(str(t.relative_to(repo_root)))
-        except Exception:
-            rel_targets.append(str(t))
-
-    if not rel_targets:
-        return
-
-    # 1) Python API (preferred by the requirements)
-    try:
-        from dvc.repo import Repo  # type: ignore
-
-        with Repo(str(repo_root)) as repo:
-            # Pull each target best-effort to avoid “not in dvc” killing the run
-            for t in rel_targets:
-                try:
-                    repo.pull(targets=[t])
-                except Exception:
-                    pass
-        return
-    except Exception:
-        pass
-
-    # 2) CLI fallback
-    try:
-        subprocess.run(["dvc", "pull", *rel_targets], check=False)
-    except FileNotFoundError:
-        # DVC not installed in PATH — fine, we can still download raw and preprocess.
-        pass
+from retailrocket_gru4rec.utils import (
+    GRU4RecOnnxWrapper,
+    _build_logger,
+    _compose_config,
+    _dvc_pull,
+    _flatten_for_mlflow,
+    _normalize_overrides,
+    find_repo_root,
+    get_git_commit_id,
+)
 
 
 def _ensure_processed_data(cfg: DictConfig) -> Path:
@@ -141,7 +44,6 @@ def _ensure_processed_data(cfg: DictConfig) -> Path:
     processed_dir = repo_root / Path(cfg.data.processed_dir)
     raw_zip = raw_dir / str(cfg.data.raw_zip_name)
 
-    # DVC integration: try to pull both processed artifacts and raw zip if they are tracked.
     if bool(cfg.data.use_dvc_pull):
         _dvc_pull(repo_root, targets=[processed_dir, raw_zip])
 
@@ -156,7 +58,6 @@ def _ensure_processed_data(cfg: DictConfig) -> Path:
     raw_dir.mkdir(parents=True, exist_ok=True)
     processed_dir.mkdir(parents=True, exist_ok=True)
 
-    # If raw zip is missing, download (Kaggle credentials must be configured in env/home).
     if not raw_zip.exists():
         ensure_raw_data(
             raw_dir=raw_dir,
@@ -164,7 +65,6 @@ def _ensure_processed_data(cfg: DictConfig) -> Path:
             zip_name=str(cfg.data.raw_zip_name),
         )
 
-    # Unzip once into raw_dir (events.csv, etc.)
     unzip_dir = raw_dir / "unzipped"
     if not unzip_dir.exists():
         unzip_dir.mkdir(parents=True, exist_ok=True)
@@ -175,7 +75,6 @@ def _ensure_processed_data(cfg: DictConfig) -> Path:
     test_size = cfg.data.get("test_size", None)
     test_size = None if test_size is None else float(test_size)
 
-    # Build processed parquet + vocab
     preprocess_retailrocket(
         input_dir=unzip_dir,
         output_dir=processed_dir,
@@ -193,14 +92,60 @@ def _ensure_processed_data(cfg: DictConfig) -> Path:
     return processed_dir
 
 
-# -------------------------
-# CLI commands
-# -------------------------
 def preprocess(*overrides: str) -> None:
     """Prepare processed parquet files (recommended for `dvc repro`)."""
     cfg = _compose_config(_normalize_overrides(overrides))
     processed_dir = _ensure_processed_data(cfg)
     print(f"Processed data is ready: {processed_dir}")
+
+
+def _export_onnx_from_cfg(cfg: DictConfig) -> Path:
+    repo_root = find_repo_root()
+    processed_dir = _ensure_processed_data(cfg)
+    spec = load_vocab(processed_dir / "vocab.json")
+
+    checkpoint_path = repo_root / str(cfg.export.checkpoint_path)
+    onnx_path = repo_root / str(cfg.export.onnx_path)
+    onnx_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if onnx_path.exists():
+        return onnx_path
+
+    base_model = load_model_from_ckpt(
+        checkpoint_path=checkpoint_path,
+        vocab_size=spec.vocab_size,
+        pad_id=spec.pad_id,
+        embedding_dim=int(cfg.model.embedding_dim),
+        hidden_dim=int(cfg.model.hidden_dim),
+        num_layers=int(cfg.model.num_layers),
+        dropout=float(cfg.model.dropout),
+        device="cpu",
+    )
+    base_model.eval()
+
+    wrapper = GRU4RecOnnxWrapper(base_model, spec.pad_id).eval()
+
+    dummy_batch = int(cfg.export.get("dummy_batch", 1))
+    dummy_seq_len = int(cfg.export.get("dummy_seq_len", int(cfg.data.max_session_len)))
+    fill_id = 1 if spec.pad_id != 1 else 2
+    dummy_seq = torch.full((dummy_batch, dummy_seq_len), fill_value=fill_id, dtype=torch.long)
+
+    opset = int(cfg.export.get("opset", 18))
+
+    with torch.inference_mode():
+        torch.onnx.export(
+            wrapper,
+            (dummy_seq,),
+            str(onnx_path),
+            input_names=["sequence"],
+            output_names=["logits"],
+            dynamic_axes={"sequence": {0: "batch", 1: "seq_len"}, "logits": {0: "batch"}},
+            opset_version=opset,
+            do_constant_folding=True,
+            dynamo=False,
+        )
+
+    return onnx_path
 
 
 def train(*overrides: str) -> None:
@@ -246,8 +191,7 @@ def train(*overrides: str) -> None:
 
     mlf_logger = _build_logger(cfg, repo_root)
 
-    # Log params in a safe, flat form
-    cfg_dict = OmegaConf.to_container(cfg, resolve=True)  # type: ignore[assignment]
+    cfg_dict = OmegaConf.to_container(cfg, resolve=True)
     flat_params = _flatten_for_mlflow(cfg_dict if isinstance(cfg_dict, dict) else {})
     flat_params["git_commit_id"] = get_git_commit_id(repo_root) or "unknown"
     flat_params["seed"] = str(seed)
@@ -286,6 +230,10 @@ def train(*overrides: str) -> None:
 
     trainer.fit(model, datamodule=dm)
     trainer.test(model, datamodule=dm, ckpt_path="best")
+
+    if bool(cfg.export.get("required", True)):
+        onnx_path = _export_onnx_from_cfg(cfg)
+        print(f"ONNX exported (mandatory): {onnx_path}")
 
 
 def evaluate(*overrides: str) -> None:
@@ -326,8 +274,6 @@ def evaluate(*overrides: str) -> None:
     print(f"Offline evaluation written to: {out_path}")
 
     if bool(cfg.eval.log_to_mlflow):
-        import mlflow
-
         mlflow.set_tracking_uri(str(cfg.logging.tracking_uri))
         mlflow.set_experiment(str(cfg.logging.experiment_name))
         with mlflow.start_run(run_name="offline_eval"):
@@ -344,173 +290,52 @@ def evaluate(*overrides: str) -> None:
             mlflow.log_artifact(str(out_path))
 
 
-def infer(*overrides: str) -> None:
-    """Offline inference from JSON requests -> JSON recommendations."""
-    cfg = _compose_config(_normalize_overrides(overrides))
-    repo_root = find_repo_root()
-
-    processed_dir = _ensure_processed_data(cfg)
-    spec = load_vocab(processed_dir / "vocab.json")
-
-    checkpoint_path = repo_root / str(cfg.infer.checkpoint_path)
-    requests_path = repo_root / str(cfg.infer.requests_path)
-    output_path = repo_root / str(cfg.infer.output_path)
-
-    run_offline_inference(
-        checkpoint_path=checkpoint_path,
-        vocab_path=processed_dir / "vocab.json",
-        vocab_size=spec.vocab_size,
-        pad_id=spec.pad_id,
-        embedding_dim=int(cfg.model.embedding_dim),
-        hidden_dim=int(cfg.model.hidden_dim),
-        num_layers=int(cfg.model.num_layers),
-        dropout=float(cfg.model.dropout),
-        device=str(cfg.infer.device),
-        requests_path=requests_path,
-        output_path=output_path,
-        topk=int(cfg.infer.topk),
-        max_session_len=int(cfg.data.max_session_len),
-    )
-    print(f"Inference saved to: {output_path}")
-
-
-def export_onnx(*overrides: str) -> None:
-    """Export GRU4Rec checkpoint to ONNX with a single input: `sequence`.
-
-    ВАЖНО:
-    - torch>=2.6 по умолчанию использует dynamo exporter (torch.export) и может падать на RNN.
-    - Мы принудительно используем legacy exporter: dynamo=False.
-    - Чтобы не тащить pack_padded_sequence в ONNX, делаем wrapper без packing.
-    """
-    cfg = _compose_config(_normalize_overrides(overrides))
-    repo_root = find_repo_root()
-
-    processed_dir = _ensure_processed_data(cfg)
-    spec = load_vocab(processed_dir / "vocab.json")
-
-    checkpoint_path = repo_root / str(cfg.export.checkpoint_path)
-    onnx_path = repo_root / str(cfg.export.onnx_path)
-    onnx_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Загружаем torch-модель на CPU
-    base_model = load_model_from_ckpt(
-        checkpoint_path=checkpoint_path,
-        vocab_size=spec.vocab_size,
-        pad_id=spec.pad_id,
-        embedding_dim=int(cfg.model.embedding_dim),
-        hidden_dim=int(cfg.model.hidden_dim),
-        num_layers=int(cfg.model.num_layers),
-        dropout=float(cfg.model.dropout),
-        device="cpu",
-    )
-    base_model.eval()
-
-    # ---- helpers to be robust to attribute names ----
-    def _get_attr(obj: object, candidates: List[str]):
-        for name in candidates:
-            if hasattr(obj, name):
-                return getattr(obj, name)
-        raise AttributeError(f"Cannot find any of attributes {candidates} in {type(obj)}")
-
-    embedding = _get_attr(base_model, ["embedding", "item_embedding", "emb", "embed"])
-    gru = _get_attr(base_model, ["gru", "rnn"])
-    proj = _get_attr(base_model, ["fc", "out", "output", "classifier", "linear"])
-
-    dropout_layer = getattr(base_model, "dropout", None)  # optional
-
-    class GRU4RecOnnxSingleInput(nn.Module):
-        """ONNX-friendly wrapper: input only `sequence` -> output `logits`."""
-
-        def __init__(self, pad_id: int):
-            super().__init__()
-            self.embedding = embedding
-            self.gru = gru
-            self.proj = proj
-            self.dropout_layer = dropout_layer
-            self.register_buffer(
-                "pad_id_t", torch.tensor(int(pad_id), dtype=torch.long), persistent=False
-            )
-
-        def forward(self, sequence: torch.Tensor) -> torch.Tensor:
-            # sequence: [B, T] int64
-            mask = sequence != self.pad_id_t  # [B, T] bool
-            lengths = mask.sum(dim=1).clamp(min=1)  # [B] int64
-
-            x = self.embedding(sequence)  # [B, T, E] (обычно)
-            # зануляем padded позиции, чтобы они не влияли
-            x = x * mask.unsqueeze(-1).to(dtype=x.dtype)
-
-            out, _ = self.gru(x)  # batch_first может быть True/False
-            # out: [B, T, H] если batch_first=True, иначе [T, B, H]
-            if getattr(self.gru, "batch_first", False) is False:
-                out = out.transpose(0, 1)  # -> [B, T, H]
-
-            # берём hidden на индексе (lengths-1) для каждого batch
-            idx = (lengths - 1).view(-1, 1, 1).expand(out.size(0), 1, out.size(2))  # [B,1,H]
-            last = out.gather(1, idx).squeeze(1)  # [B,H]
-
-            if isinstance(self.dropout_layer, nn.Module):
-                last = self.dropout_layer(last)
-
-            logits = self.proj(last)  # [B, vocab]
-            return logits
-
-    wrapper = GRU4RecOnnxSingleInput(pad_id=spec.pad_id).eval()
-
-    # dummy input
-    dummy_batch = int(cfg.export.get("dummy_batch", 1))
-    dummy_seq_len = int(cfg.export.get("dummy_seq_len", int(cfg.data.max_session_len)))
-    # лучше не паддинг, чтобы lengths > 0
-    fill_id = 1 if spec.pad_id != 1 else 2
-    dummy_seq = torch.full((dummy_batch, dummy_seq_len), fill_value=fill_id, dtype=torch.long)
-
-    # Рекомендую opset 18 (у тебя и так PyTorch говорит что поднимет до 18)
-    opset = int(cfg.export.get("opset", 18))
-
-    with torch.inference_mode():
-        torch.onnx.export(
-            wrapper,
-            (dummy_seq,),
-            str(onnx_path),
-            input_names=["sequence"],
-            output_names=["logits"],
-            dynamic_axes={
-                "sequence": {0: "batch", 1: "seq_len"},
-                "logits": {0: "batch"},
-            },
-            opset_version=opset,
-            do_constant_folding=True,
-            # КЛЮЧЕВОЕ: выключаем dynamo exporter, чтобы не падало на torch.export + GRU
-            dynamo=False,
-        )
-
-    print(f"Exported ONNX to: {onnx_path}")
-
-
 def export_mlflow(*overrides: str) -> None:
-    from retailrocket_gru4rec.serving.mlflow_pyfunc import save_pyfunc_model
-
-    """Export MLflow pyfunc model directory for `mlflow models serve`."""
     cfg = _compose_config(_normalize_overrides(overrides))
     repo_root = find_repo_root()
 
     processed_dir = _ensure_processed_data(cfg)
     vocab_path = processed_dir / "vocab.json"
-    checkpoint_path = repo_root / str(cfg.serve.checkpoint_path)
-    model_dir = repo_root / str(cfg.serve.model_dir)
 
+    onnx_path = _export_onnx_from_cfg(cfg)
+
+    model_dir = repo_root / str(cfg.serve.model_dir)
     model_dir.parent.mkdir(parents=True, exist_ok=True)
 
     save_pyfunc_model(
         model_dir=model_dir,
-        checkpoint_path=checkpoint_path,
+        onnx_path=onnx_path,
         vocab_path=vocab_path,
-        model_params=OmegaConf.to_container(cfg.model, resolve=True),
         topk=int(cfg.serve.topk),
-        device=str(cfg.serve.device),
-        code_paths=["retailrocket_gru4rec"],
+        code_paths=[str(repo_root / "retailrocket_gru4rec")],
     )
-    print(f"Exported MLflow model to: {model_dir}")
+    print(f"Exported MLflow(ONNX) model to: {model_dir}")
+
+
+def serve_mlflow(*overrides: str) -> None:
+    cfg = _compose_config(_normalize_overrides(overrides))
+    repo_root = find_repo_root()
+
+    model_dir = repo_root / str(cfg.serve.model_dir)
+    host = str(getattr(cfg.serve, "host", "127.0.0.1"))
+    port = int(getattr(cfg.serve, "port", 5000))
+
+    if not model_dir.exists():
+        export_mlflow(*overrides)
+
+    cmd = [
+        "mlflow",
+        "models",
+        "serve",
+        "-m",
+        str(model_dir),
+        "-h",
+        host,
+        "-p",
+        str(port),
+        "--no-conda",
+    ]
+    subprocess.run(cmd, check=True)
 
 
 def main() -> None:
@@ -519,9 +344,8 @@ def main() -> None:
             "preprocess": preprocess,
             "train": train,
             "evaluate": evaluate,
-            "infer": infer,
-            "export_onnx": export_onnx,
             "export_mlflow": export_mlflow,
+            "serve_mlflow": serve_mlflow,
         }
     )
 

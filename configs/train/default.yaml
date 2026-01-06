@@ -9,7 +9,7 @@ gradient_clip_val: 1.0
 artifacts_dir: artifacts
 checkpoints_dir: ${train.artifacts_dir}/checkpoints
 
-accelerator: cpu
+accelerator: gpu
 devices: 1
 log_every_n_steps: 50
 

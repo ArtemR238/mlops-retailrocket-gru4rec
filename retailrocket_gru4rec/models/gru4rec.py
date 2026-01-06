@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
 
 import torch
 import torch.nn as nn
@@ -18,13 +17,13 @@ class GRU4RecConfig:
 
 
 class GRU4Rec(nn.Module):
-    """A minimal GRU-based next-item model.
+    """A GRU-based next-item model.
 
     Input:
       - sequence: [B, L] (padded)
-      - lengths:  [B]
+      - lengths: [B]
     Output:
-      - logits:   [B, vocab_size]
+      - logits: [B, vocab_size]
     """
 
     def __init__(self, cfg: GRU4RecConfig):
@@ -47,12 +46,12 @@ class GRU4Rec(nn.Module):
         self.output = nn.Linear(cfg.hidden_dim, cfg.vocab_size)
 
     def forward(self, sequence: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
-        emb = self.item_embedding(sequence)  # [B, L, D]
+        emb = self.item_embedding(sequence)
         packed = nn.utils.rnn.pack_padded_sequence(
             emb, lengths.cpu(), batch_first=True, enforce_sorted=False
         )
-        _, h_last = self.gru(packed)  # [num_layers, B, H]
-        h = h_last[-1]  # [B, H]
+        _, h_last = self.gru(packed)
+        h = h_last[-1]
         h = self.dropout(h)
-        logits = self.output(h)  # [B, V]
+        logits = self.output(h)
         return logits

@@ -69,7 +69,6 @@ def _build_sessions(
         ts = grp["timestamp"].to_numpy(dtype=np.int64)
         it = grp["itemid"].to_numpy(dtype=np.int64)
 
-        # new session starts where gap > threshold
         gaps = np.diff(ts, prepend=ts[0])
         is_new = gaps > gap_ms
 
@@ -89,7 +88,6 @@ def _build_sessions(
                     session_id += 1
                 start = i
 
-        # last chunk
         seq = it[start:].tolist()
         if len(seq) >= min_session_len:
             rows.append(
@@ -172,11 +170,6 @@ def preprocess_retailrocket(
 
     Reads:  input_dir/events.csv
     Writes: output_dir/{train,val,test}.parquet and vocab.json
-
-    Note:
-      - If test_size is provided (legacy style), we interpret it as:
-        test_frac = test_size, val_frac = test_size, train_frac = 1 - 2*test_size
-      - Otherwise we use train_frac/val_frac/test_frac (recommended).
     """
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -190,9 +183,7 @@ def preprocess_retailrocket(
     events["visitorid"] = events["visitorid"].astype("int64")
     events["itemid"] = events["itemid"].astype("int64")
 
-    # Optional subsampling for course-scale runs
     if max_users is not None:
-        # deterministic top-N by event count (stable & simple)
         user_counts = events.groupby("visitorid", sort=False).size()
         top_users = user_counts.nlargest(int(max_users)).index
         events = events[events["visitorid"].isin(top_users)]
@@ -209,7 +200,6 @@ def preprocess_retailrocket(
             "No sessions were built. Try lowering min_session_len or increasing max_users."
         )
 
-    # Decide split strategy
     if test_size is not None:
         ts = float(test_size)
         if ts <= 0 or ts >= 0.5:

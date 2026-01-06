@@ -18,10 +18,6 @@ class OptimConfig:
 
 
 def _register_torch_safe_globals() -> None:
-    """
-    torch>=2.6 safe-unpickler (weights_only=True) блокирует кастомные классы.
-    Разрешаем наши dataclass-ы, чтобы чекпойнты Lightning грузились без ошибок.
-    """
     try:
         add_safe_globals = torch.serialization.add_safe_globals
     except AttributeError:
@@ -31,7 +27,6 @@ def _register_torch_safe_globals() -> None:
     try:
         add_safe_globals([GRU4RecConfig, OptimConfig])
     except Exception:
-        # Не ломаем импорт из-за allowlist
         return
 
 
@@ -51,8 +46,6 @@ class GRU4RecLightning(pl.LightningModule):
         self.optim_cfg = optim_cfg
         self.k_metrics = list(k_metrics)
 
-        # В checkpoint кладём только JSON-сериализуемые структуры,
-        # чтобы weights_only unpickler не падал.
         model_cfg_hp = asdict(model_cfg) if is_dataclass(model_cfg) else dict(model_cfg)
         optim_cfg_hp = asdict(optim_cfg) if is_dataclass(optim_cfg) else dict(optim_cfg)
 

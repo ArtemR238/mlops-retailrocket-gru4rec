@@ -1,16 +1,5 @@
 from __future__ import annotations
 
-"""Offline evaluation utilities.
-
-This module provides:
-  - a simple TopPopular baseline,
-  - offline evaluation for GRU4Rec checkpoints,
-  - unified metrics (Recall@K, MRR@K, NDCG@K).
-
-All inputs are assumed to be the *processed* parquet files produced by
-`retailrocket_gru4rec.data.preprocess`.
-"""
-
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
@@ -24,15 +13,6 @@ from retailrocket_gru4rec.inference.predictor import load_model_from_ckpt, predi
 
 
 def _unwrap_topk(x: Any) -> np.ndarray:
-    """
-    predict_topk() может вернуть:
-      - np.ndarray (B, K)
-      - torch.Tensor (B, K)
-      - InferenceResult(...) с полем topk_items / items / item_ids / recs / predictions
-
-    Приводим к np.ndarray[int64] (B, K).
-    """
-    # unwrap common container attrs
     for attr in ("topk_items", "items", "item_ids", "recs", "predictions", "topk"):
         if hasattr(x, attr):
             x = getattr(x, attr)
@@ -71,11 +51,9 @@ def _metrics_from_recs(recs: np.ndarray, targets: np.ndarray, k: int) -> Dict[st
     assert recs.ndim == 2 and recs.shape[1] >= k
     recs_k = recs[:, :k]
 
-    # hit positions: -1 if not found
     hits = recs_k == targets[:, None]
     hit_any = hits.any(axis=1)
 
-    # rank (1-based) where hit occurs
     ranks = np.argmax(hits, axis=1) + 1
     ranks = np.where(hit_any, ranks, 0)
 
@@ -153,7 +131,6 @@ def evaluate_gru4rec_from_checkpoint(
     df_test = pd.read_parquet(test_parquet, columns=["items"])
     sessions = [seq for seq in df_test["items"].tolist() if len(seq) >= 2]
 
-    # input is prefix, target is last item
     prefixes = [seq[:-1] for seq in sessions]
     targets = np.asarray([int(seq[-1]) for seq in sessions], dtype=np.int64)
 
@@ -170,7 +147,6 @@ def evaluate_gru4rec_from_checkpoint(
 
     recs = np.zeros((len(prefixes), max_k), dtype=np.int64)
 
-    # batching
     max_session_len = max(len(p) for p in prefixes)
     max_session_len = max(max_session_len, 1)
 

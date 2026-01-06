@@ -21,12 +21,8 @@ def download_retailrocket_kaggle(raw_zip: Path, dataset: str, zip_name: str) -> 
     if zip_path.exists():
         return zip_path
 
-    # The kaggle command comes from the `kaggle` Python package.
-    # We call it via subprocess to avoid extra runtime dependencies.
     cmd = ["kaggle", "datasets", "download", "-d", dataset, "-p", str(raw_zip), "--force"]
     subprocess.check_call(cmd)
-    # Kaggle usually names the archive after the dataset slug (ecommerce-dataset.zip),
-    # but we normalize to zip_name.
     downloaded = next(raw_zip.glob("*.zip"))
     if downloaded.name != zip_name:
         shutil.move(str(downloaded), str(zip_path))
@@ -40,7 +36,6 @@ def ensure_raw_data(raw_dir: Path, dataset: str, zip_name: str) -> Path:
     if zip_path.exists():
         return zip_path
 
-    # Try Kaggle download
     try:
         return download_retailrocket_kaggle(raw_dir=raw_dir, dataset=dataset, zip_name=zip_name)
     except Exception as exc:

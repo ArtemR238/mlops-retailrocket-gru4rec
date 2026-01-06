@@ -1,7 +1,7 @@
 # Offline evaluation configuration
 
 # By default we evaluate the best checkpoint used for inference
-checkpoint_path: ${infer.checkpoint_path}
+checkpoint_path: ${export.checkpoint_path}
 
 # Where to store the JSON summary
 output_path: plots/offline_eval.json
@@ -10,6 +10,6 @@ output_path: plots/offline_eval.json
 batch_size: 512
 device: cpu
 
-pad_id: 
+pad_id:
 # Optionally log metrics to MLflow (requires server)
 log_to_mlflow: false

@@ -1,13 +1,12 @@
-# MLflow serving / pyfunc export configuration
-
-# If you don't override, we export the same checkpoint as in `infer`
-checkpoint_path: ${infer.checkpoint_path}
-
-# Output directory for `mlflow.pyfunc.save_model` (relative to repo root)
 model_dir: artifacts/mlflow_model
 
-# How many items to return for each session
-topk: 20
+checkpoint_path: artifacts/checkpoints/last.ckpt
 
-# Device for serving (cpu/cuda)
+# serving params
 device: cpu
+topk: 20
+overwrite: true
+
+# mlflow models serve params
+host: 127.0.0.1
+port: 5000

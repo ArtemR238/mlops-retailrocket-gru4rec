@@ -1,42 +1,71 @@
-# Python
 __pycache__/
 *.py[cod]
 *.so
 *.egg-info/
-dist/
 build/
+dist/
+
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Environments
 .venv/
 venv/
+
+# dotenv (креды не коммитим)
+.env
+.env.*
+!.env.example
 
 # Jupyter
 .ipynb_checkpoints/
 
+# IDE
+.vscode/
+.idea/
+
 # OS
 .DS_Store
+Thumbs.db
 
-# ML artifacts / data (must not be committed)
-data/raw/*
-!data/raw/*.dvc
-!data/raw/.gitkeep
 
-data/processed/*
-!data/processed/*.dvc
-!data/processed/.gitkeep
+outputs/
+multirun/
+.multirun/
 
-artifacts/*
-!artifacts/*.dvc
-!artifacts/.gitkeep
 
-plots/mlruns/
 mlruns/
+plots/mlruns/
+
+
+.dvc/cache/
+.dvc/tmp/
+.dvc/config.local
+
+
+data/raw/**
+!data/raw/.gitkeep
+!data/raw/*.dvc
+
+data/processed/**
+!data/processed/.gitkeep
+!data/processed/*.dvc
+
+artifacts/**
+!artifacts/.gitkeep
+!artifacts/*.dvc
+
+plots/**
+!plots/.gitkeep
+
+
 *.ckpt
 *.pth
 *.onnx
 *.trt
 
-# Hydra
-outputs/
-.multirun/
-
-# DVC
-.dvc/cache/
+mlflow.db
+*.db

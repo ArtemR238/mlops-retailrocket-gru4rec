@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
-import numpy as np
 import pandas as pd
 import torch
 from torch.utils.data import Dataset
@@ -18,12 +18,10 @@ class VocabSpec:
 
 
 def load_vocab(vocab_path: Path) -> VocabSpec:
-    import json
 
     payload = json.loads(vocab_path.read_text(encoding="utf-8"))
     pad_id = int(payload["pad_id"])
     oov_id = int(payload["oov_id"])
-    # +2 for PAD/OOV if not included already; item_to_id values start from 2 in our preprocessing
     vocab_size = max(payload["item_to_id"].values(), default=1) + 1
     return VocabSpec(pad_id=pad_id, oov_id=oov_id, vocab_size=vocab_size)
 
@@ -43,7 +41,6 @@ class SessionNextItemDataset(Dataset):
             raise ValueError("Expected 'items' column in parquet")
         self.items = self.df["items"].tolist()
 
-        # Keep only sessions with at least 2 events (otherwise no target)
         self.items = [seq for seq in self.items if len(seq) >= 2]
 
     def __len__(self) -> int:

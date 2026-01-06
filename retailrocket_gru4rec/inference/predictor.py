@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 import torch
 
@@ -28,7 +28,7 @@ def load_model_from_ckpt(
     device: str,
 ) -> GRU4Rec:
     # For simplicity, load state_dict saved by Lightning checkpoints
-    ckpt = torch.load(checkpoint_path, map_location="cpu")
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state_dict = ckpt["state_dict"]
     # strip 'model.' prefix used in LightningModule
     model_state = {
