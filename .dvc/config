@@ -1,9 +1,5 @@
 [core]
     remote = yandex
-['remote "local"']
-    url = /home/artem.remnev/dvc_remote
-['remote "gdrive"']
-    url = gdrive://1H8O86CP1YzXXNi_ze4gHo2yybk7tBsu6
 ['remote "yandex"']
     url = s3://mlops-hw-retailrocket/dvc
     endpointurl = https://storage.yandexcloud.net
