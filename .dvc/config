@@ -1,6 +1,0 @@
-[core]
-    remote = yandex
-['remote "yandex"']
-    url = s3://mlops-hw-retailrocket/dvc
-    endpointurl = https://storage.yandexcloud.net
-    region = ru-central1
