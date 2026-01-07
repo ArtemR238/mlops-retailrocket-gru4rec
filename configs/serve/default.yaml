@@ -1,0 +1,12 @@
+model_dir: artifacts/mlflow_model
+
+checkpoint_path: artifacts/checkpoints/last.ckpt
+
+# serving params
+device: cpu
+topk: 20
+overwrite: true
+
+# mlflow models serve params
+host: 127.0.0.1
+port: 5000

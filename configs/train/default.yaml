@@ -1,0 +1,18 @@
+batch_size: 512
+num_workers: 4
+learning_rate: 1e-3
+weight_decay: 1e-6
+max_epochs: 3
+gradient_clip_val: 1.0
+
+# output paths
+artifacts_dir: artifacts
+checkpoints_dir: ${train.artifacts_dir}/checkpoints
+
+accelerator: gpu
+devices: 1
+log_every_n_steps: 50
+
+# logging / plots
+plots_dir: plots
+k_metrics: [5, 10, 20]

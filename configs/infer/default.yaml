@@ -1,0 +1,5 @@
+input_path: examples/infer_request.json
+output_path: artifacts/infer_response.json
+k: 20
+
+checkpoint_path: ${train.checkpoints_dir}/last.ckpt

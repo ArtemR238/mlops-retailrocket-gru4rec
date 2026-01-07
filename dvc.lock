@@ -1,0 +1,151 @@
+schema: '2.0'
+stages:
+  preprocess:
+    cmd: poetry run python -m retailrocket_gru4rec.commands preprocess
+      data.use_dvc_pull=false
+    deps:
+    - path: configs
+      hash: md5
+      md5: 64afcfdd91418905b642a931f8c64807.dir
+      size: 2423
+      nfiles: 9
+    - path: retailrocket_gru4rec/commands.py
+      hash: md5
+      md5: 3f8e657ade1e89e02efe85f634185aef
+      size: 12529
+    - path: retailrocket_gru4rec/data/dataset.py
+      hash: md5
+      md5: c125cb369495c36bee31dfd214ad8c5e
+      size: 2117
+    - path: retailrocket_gru4rec/data/download.py
+      hash: md5
+      md5: 9c10ecb6d5123c248d957551e29c8c90
+      size: 1822
+    - path: retailrocket_gru4rec/data/preprocess.py
+      hash: md5
+      md5: 5deaa808f76947374ffea6d276c8f5c8
+      size: 7508
+    outs:
+    - path: data/processed
+      hash: md5
+      md5: ab0013bea6f9a4d8c9a74dd1847bd7d1.dir
+      size: 6007859
+      nfiles: 4
+  train:
+    cmd: poetry run python -m retailrocket_gru4rec.commands train
+      data.use_dvc_pull=true logging.fail_if_unavailable=false
+    deps:
+    - path: configs
+      hash: md5
+      md5: 64afcfdd91418905b642a931f8c64807.dir
+      size: 2423
+      nfiles: 9
+    - path: data/processed
+      hash: md5
+      md5: ab0013bea6f9a4d8c9a74dd1847bd7d1.dir
+      size: 6007859
+      nfiles: 4
+    - path: retailrocket_gru4rec/commands.py
+      hash: md5
+      md5: 3f8e657ade1e89e02efe85f634185aef
+      size: 12529
+    - path: retailrocket_gru4rec/inference
+      hash: md5
+      md5: 52463f17a59ade6f31f1ac458ee3b409.dir
+      size: 6562
+      nfiles: 4
+    - path: retailrocket_gru4rec/models
+      hash: md5
+      md5: 69c77ca0c4665bc80ba951d6c48ffae8.dir
+      size: 3655
+      nfiles: 4
+    - path: retailrocket_gru4rec/training
+      hash: md5
+      md5: 6f3e9007622c9fb9922fceab6f0e6d18.dir
+      size: 19003
+      nfiles: 10
+    - path: retailrocket_gru4rec/utils.py
+      hash: md5
+      md5: d60c5dc8d429a627c4ac67e0d1d452eb
+      size: 5343
+    outs:
+    - path: artifacts/checkpoints
+      hash: md5
+      md5: 2b919e6046e388c48b3767367857b8a2.dir
+      size: 98668330
+      nfiles: 2
+    - path: artifacts/onnx
+      hash: md5
+      md5: f54ca9e6c31b07e0c408c4f1fc5a074b.dir
+      size: 16446988
+      nfiles: 1
+  export_mlflow:
+    cmd: poetry run python -m retailrocket_gru4rec.commands export_mlflow
+      data.use_dvc_pull=true
+    deps:
+    - path: artifacts/onnx
+      hash: md5
+      md5: f54ca9e6c31b07e0c408c4f1fc5a074b.dir
+      size: 16446988
+      nfiles: 1
+    - path: configs
+      hash: md5
+      md5: 64afcfdd91418905b642a931f8c64807.dir
+      size: 2423
+      nfiles: 9
+    - path: data/processed
+      hash: md5
+      md5: ab0013bea6f9a4d8c9a74dd1847bd7d1.dir
+      size: 6007859
+      nfiles: 4
+    - path: retailrocket_gru4rec/commands.py
+      hash: md5
+      md5: 3f8e657ade1e89e02efe85f634185aef
+      size: 12529
+    - path: retailrocket_gru4rec/serving/mlflow_pyfunc.py
+      hash: md5
+      md5: d9686ea8a4ab36eeeaef7d3024755cbc
+      size: 5110
+    - path: retailrocket_gru4rec/utils.py
+      hash: md5
+      md5: d60c5dc8d429a627c4ac67e0d1d452eb
+      size: 5343
+    outs:
+    - path: artifacts/mlflow_model
+      hash: md5
+      md5: 80a1d796cc20cb2a017c6d8491c155eb.dir
+      size: 17031703
+      nfiles: 34
+  evaluate:
+    cmd: poetry run python -m retailrocket_gru4rec.commands evaluate
+      data.use_dvc_pull=true
+    deps:
+    - path: artifacts/checkpoints
+      hash: md5
+      md5: 2b919e6046e388c48b3767367857b8a2.dir
+      size: 98668330
+      nfiles: 2
+    - path: configs
+      hash: md5
+      md5: 64afcfdd91418905b642a931f8c64807.dir
+      size: 2423
+      nfiles: 9
+    - path: data/processed
+      hash: md5
+      md5: ab0013bea6f9a4d8c9a74dd1847bd7d1.dir
+      size: 6007859
+      nfiles: 4
+    - path: retailrocket_gru4rec/commands.py
+      hash: md5
+      md5: 3f8e657ade1e89e02efe85f634185aef
+      size: 12529
+    - path: retailrocket_gru4rec/evaluation/offline.py
+      hash: md5
+      md5: dbd577e936143b1e40a2739181d50fb7
+      size: 5829
+    outs:
+    - path: plots
+      hash: md5
+      md5: 67a5815cd2a953899e811697c40c02af.dir
+      size: 771
+      nfiles: 1

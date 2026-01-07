@@ -1,0 +1,48 @@
+stages:
+  preprocess:
+    cmd: poetry run python -m retailrocket_gru4rec.commands preprocess data.use_dvc_pull=false
+    deps:
+      - retailrocket_gru4rec/commands.py
+      - retailrocket_gru4rec/data/preprocess.py
+      - retailrocket_gru4rec/data/download.py
+      - retailrocket_gru4rec/data/dataset.py
+      - configs
+    outs:
+      - data/processed
+
+  train:
+    cmd: poetry run python -m retailrocket_gru4rec.commands train data.use_dvc_pull=true logging.fail_if_unavailable=false
+    deps:
+      - retailrocket_gru4rec/commands.py
+      - retailrocket_gru4rec/utils.py
+      - retailrocket_gru4rec/models
+      - retailrocket_gru4rec/training
+      - retailrocket_gru4rec/inference
+      - configs
+      - data/processed
+    outs:
+      - artifacts/checkpoints
+      - artifacts/onnx
+
+  evaluate:
+    cmd: poetry run python -m retailrocket_gru4rec.commands evaluate data.use_dvc_pull=true
+    deps:
+      - retailrocket_gru4rec/commands.py
+      - retailrocket_gru4rec/evaluation/offline.py
+      - configs
+      - data/processed
+      - artifacts/checkpoints
+    outs:
+      - plots
+
+  export_mlflow:
+    cmd: poetry run python -m retailrocket_gru4rec.commands export_mlflow data.use_dvc_pull=true
+    deps:
+      - retailrocket_gru4rec/commands.py
+      - retailrocket_gru4rec/serving/mlflow_pyfunc.py
+      - retailrocket_gru4rec/utils.py
+      - configs
+      - data/processed
+      - artifacts/onnx
+    outs:
+      - artifacts/mlflow_model

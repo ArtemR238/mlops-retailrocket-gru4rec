@@ -1,0 +1,11 @@
+defaults:
+  - data: retailrocket
+  - model: gru4rec
+  - train: default
+  - eval: default
+  - serve: default
+  - export: default
+  - logging: mlflow
+
+project_name: retailrocket-gru4rec
+seed: 42
