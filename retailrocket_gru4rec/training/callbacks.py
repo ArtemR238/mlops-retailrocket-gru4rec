@@ -16,7 +16,6 @@ class SaveCurvesCallback(pl.Callback):
 
     def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         metrics = trainer.callback_metrics
-        # collect scalar metrics
         for k, v in metrics.items():
             if hasattr(v, "item"):
                 self.history.setdefault(k, []).append(float(v.item()))
@@ -37,7 +36,6 @@ class SaveCurvesCallback(pl.Callback):
             plt.savefig(self.plots_dir / fname)
             plt.close()
 
-        # At least 3 graphs required
         plot_series("train_loss", "train_loss.png")
         plot_series("val_loss", "val_loss.png")
         plot_series("val_recall@20", "val_recall@20.png")

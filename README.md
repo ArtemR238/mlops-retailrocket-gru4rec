@@ -68,18 +68,13 @@ poetry install
 
 ### 5.2 Configure DVC remote credentials (required to pull data/artifacts)
 
-This project expects the reviewer to pull everything needed from a DVC remote (S3-compatible storage). Set credentials via environment variables (**do not commit secrets to git**):
+This project expects the reviewer to pull everything needed from a DVC remote (S3-compatible storage). Set credentials via environment variables:
 
 ```bash
 export AWS_ACCESS_KEY_ID="***"
 export AWS_SECRET_ACCESS_KEY="***"
 export AWS_DEFAULT_REGION="ru-central1"
-```
 
-If your environment uses a custom S3 endpoint (typical for S3-compatible storage), configure it as well (only if applicable in your setup):
-
-```bash
-export AWS_ENDPOINT_URL="https://<your-s3-endpoint>"
 ```
 
 ---
@@ -111,8 +106,6 @@ Outputs:
 
 - `artifacts/checkpoints/` (best + last checkpoints)
 - `artifacts/onnx/` (ONNX model export)
-
-**Important:** ONNX export is a mandatory part of training and happens at the end of the `train` command.
 
 ### 6.3 Optional: Evaluate
 
@@ -160,7 +153,7 @@ artifacts/mlflow_model/
 
 ## 8. Infer (MLflow Serving)
 
-This project performs inference **only via MLflow Serving** (no offline inference CLI).
+This project performs inference **only via MLflow Serving**.
 
 ### 8.1 Fast path (recommended for reviewers): inference without training
 
